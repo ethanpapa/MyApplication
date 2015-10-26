@@ -3,31 +3,25 @@ package com.shin.nuleedasle.myapplication;
 import android.annotation.TargetApi;
 import android.app.AlertDialog;
 import android.content.DialogInterface;
-import android.os.Parcel;
+import android.os.Handler;
 import android.os.Parcelable;
 import android.support.v7.app.ActionBar;
 import android.app.ProgressDialog;
 import android.content.Context;
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.os.Build;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
-import android.util.SparseArray;
+import android.support.v7.widget.LinearLayoutManager;
+import android.support.v7.widget.RecyclerView;
 import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.inputmethod.InputMethodManager;
-import android.widget.AbsListView;
-import android.widget.AdapterView;
-import android.widget.BaseAdapter;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageView;
-import android.widget.ListView;
-import android.widget.TextView;
 import android.widget.Toast;
 
 import com.android.volley.AuthFailureError;
@@ -40,7 +34,6 @@ import com.android.volley.Response;
 import com.android.volley.ServerError;
 import com.android.volley.TimeoutError;
 import com.android.volley.VolleyError;
-import com.android.volley.toolbox.DiskBasedCache;
 import com.android.volley.toolbox.ImageLoader;
 import com.android.volley.toolbox.Volley;
 import com.shin.nuleedasle.myapplication.models.DataModelForList;
@@ -50,20 +43,24 @@ import com.shin.nuleedasle.myapplication.models.FlickrResponse;
 import com.shin.nuleedasle.myapplication.models.FlickrResponsePhotoSize;
 import com.shin.nuleedasle.myapplication.models.FlickrResponsePhotos;
 import com.shin.nuleedasle.myapplication.models.FlickrSizeResponse;
+import com.shin.nuleedasle.myapplication.utils.DataAdapter;
+import com.shin.nuleedasle.myapplication.utils.OnItemClickListener;
+import com.shin.nuleedasle.myapplication.utils.OnLoadMoreDataListener;
 import com.shin.nuleedasle.myapplication.volley_utils.GsonRequest;
-import com.shin.nuleedasle.myapplication.utils.BitmapUtil;
-import java.io.File;
+
 import java.util.ArrayList;
-import java.util.List;
 
 public class MainActivity extends AppCompatActivity {
 
     private Button mSearchButton;
     private RequestQueue mVolleyQueue;
-    private ListView mListView;
-    private ListViewAdapter mAdapter;
+    private RecyclerView mRecyclerListView;
+    private DataAdapter mAdapter;
+    private LinearLayoutManager mLinearLayoutManager;
+    protected Handler mHandler;
+
     private ProgressDialog mProgress;
-    private List<DataModelForList> mDataList;
+    private ArrayList<DataModelForList> mDataList;
     private int mCurrentPageNumber = 1;
     private String mCurrentSearchKeyword;
     private EditText mSearchField;
@@ -78,32 +75,6 @@ public class MainActivity extends AppCompatActivity {
     private int currentPage = 1;
     static int FEEDS_PER_PAGE = 20;
 
-    public  class DiskBitmapCache extends DiskBasedCache implements ImageLoader.ImageCache {
-
-        public DiskBitmapCache(File rootDirectory, int maxCacheSizeInBytes) {
-            super(rootDirectory, maxCacheSizeInBytes);
-        }
-
-        public DiskBitmapCache(File cacheDir) {
-            super(cacheDir);
-        }
-
-        public Bitmap getBitmap(String url) {
-            final Entry requestedItem = get(url);
-
-            if (requestedItem == null)
-                return null;
-
-            return BitmapFactory.decodeByteArray(requestedItem.data, 0, requestedItem.data.length);
-        }
-
-        public void putBitmap(String url, Bitmap bitmap) {
-            final Entry entry = new Entry();
-            entry.data = BitmapUtil.convertBitmapToBytes(bitmap) ;
-            put(url, entry);
-        }
-    }
-
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -116,18 +87,20 @@ public class MainActivity extends AppCompatActivity {
         mVolleyQueue = Volley.newRequestQueue(this);
 
         int max_cache_size = 1000000;
-        mImageLoader = new ImageLoader(mVolleyQueue, new DiskBitmapCache(getCacheDir(),max_cache_size));
 
         mDataList = new ArrayList<DataModelForList>();
 
-        mListView = (ListView) findViewById(R.id.image_list);
         mSearchButton = (Button) findViewById(R.id.send_http);
         mSearchField = (EditText)findViewById(R.id.txtKeyWord);
+        mHandler = new Handler();
 
-        mListView.setOnScrollListener(new EndlessScrollListener());
-        mAdapter = new ListViewAdapter(this);
-        mListView.setAdapter(mAdapter);
+        mRecyclerListView = (RecyclerView) findViewById(R.id.image_list);
+        mLinearLayoutManager = new LinearLayoutManager(this);
+        mRecyclerListView.setLayoutManager(mLinearLayoutManager);
+        mAdapter = new DataAdapter(mDataList , mRecyclerListView , this);
+        mRecyclerListView.setAdapter(mAdapter);
 
+        mImageLoader = new ImageLoader(mVolleyQueue, new DataAdapter.DiskBitmapCache(this.getCacheDir(),max_cache_size));
 
         mSearchButton.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -142,6 +115,34 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
+        mAdapter.setItemClickListener(new OnItemClickListener() {
+            @Override
+            public void onItemClick(String imageid) {
+                getPhotoSizeHttpRequest(imageid);
+            }
+        });
+
+        mAdapter.setOnLoadMoreDataListener(new OnLoadMoreDataListener() {
+            @Override
+            public void onLoadMoreData() {
+                //add null , so the adapter will check view_type and show progress bar at bottom
+                mDataList.add(null);
+                mAdapter.notifyItemInserted(mDataList.size() - 1);
+
+                mHandler.postDelayed(new Runnable() {
+                    @Override
+                    public void run() {
+                        //   remove progress item
+                        mDataList.remove(mDataList.size() - 1);
+                        mAdapter.notifyItemRemoved(mDataList.size());
+                        mCurrentPageNumber++;
+                        makeSampleHttpRequest(mCurrentSearchKeyword, mCurrentPageNumber);
+                    }
+                }, 2000);
+            }
+        });
+
+        /*
         mListView.setOnItemClickListener(new AdapterView.OnItemClickListener(){
             @Override
             public void onItemClick(AdapterView<?> arg0, View arg1, int arg2, long arg3) {
@@ -151,6 +152,7 @@ public class MainActivity extends AppCompatActivity {
                 getPhotoSizeHttpRequest(mDataList.get((int)id).getImageID());
             }
         });
+        */
     }
 
     @TargetApi(Build.VERSION_CODES.HONEYCOMB)
@@ -177,7 +179,7 @@ public class MainActivity extends AppCompatActivity {
         builder.appendQueryParameter("format", "json");
         builder.appendQueryParameter("nojsoncallback", "1");
 
-        builder.appendQueryParameter("per_page","10");
+        builder.appendQueryParameter("per_page",Integer.toString(FEEDS_PER_PAGE));
         builder.appendQueryParameter("page", Integer.toString(currentPage));
         builder.appendQueryParameter("text",keyword);
 
@@ -187,7 +189,6 @@ public class MainActivity extends AppCompatActivity {
             public void onResponse(FlickrResponsePhotos response) {
                 try {
                     parseFlickrImageResponse(response);
-                    mAdapter.notifyDataSetChanged();
 
                 } catch (Exception e) {
                     e.printStackTrace();
@@ -225,6 +226,8 @@ public class MainActivity extends AppCompatActivity {
     @Override
     public void onRestoreInstanceState(Bundle savedInstanceState){
         mDataList = savedInstanceState.getParcelableArrayList("list");
+        mAdapter.setDateModel(mDataList);
+        mAdapter.notifyDataSetChanged();
     }
 
 
@@ -257,16 +260,18 @@ public class MainActivity extends AppCompatActivity {
                     + "/" + flkrImage.getId() + "_" + flkrImage.getSecret() + "_t.jpg";
             DataModelForList model = new DataModelForList();
             model.setImageUrl(imageUrl);
-            model.setTitle(flkrImage.getTitle());
+            model.setTitle("INDEX : " + Integer.toString(index) + " " + flkrImage.getTitle());
             model.setImageID(flkrImage.getId());
             mDataList.add(model);
-
         }
+        mAdapter.notifyDataSetChanged();
+        mAdapter.setLoaded();
     }
 
+    /*
     public class EndlessScrollListener implements AbsListView.OnScrollListener {
 
-        private int visibleThreshold = FEEDS_PER_PAGE; // google return 20 at a time
+        private int visibleThreshold = FEEDS_PER_PAGE;
         private int currentPage = 0;
         private int previousTotal = 0;
         private boolean loading = true;
@@ -299,8 +304,8 @@ public class MainActivity extends AppCompatActivity {
         public void onScrollStateChanged(AbsListView view, int scrollState) {
         }
     }
-
-
+*/
+/*
     private class ListViewAdapter extends BaseAdapter {
 
         private LayoutInflater mInflater;
@@ -346,7 +351,7 @@ public class MainActivity extends AppCompatActivity {
             ImageView image;
         }
     }
-
+*/
     private void loadPhoto(FlickrResponsePhotoSize response) {
         String imageUrl="", width ="", hight="";
         FlickrSizeResponse photoSize = response.getPhotoSize();
