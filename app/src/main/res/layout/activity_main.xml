@@ -25,7 +25,7 @@
             android:imeOptions="actionDone"
             android:singleLine="true"
             android:layout_toStartOf="@+id/send_http"
-            android:layout_weight="1.04" />
+            android:layout_weight="1" />
 
         <Button
             android:id="@+id/send_http"
@@ -33,7 +33,8 @@
             android:layout_height="wrap_content"
             android:text="Search"
             android:layout_alignParentTop="true"
-            android:layout_alignParentEnd="true" />
+            android:layout_alignParentEnd="true"
+            android:layout_gravity="right" />
 
     </LinearLayout>
 
